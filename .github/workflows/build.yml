@@ -1,0 +1,87 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  # Path to the solution file relative to the root of the project.
+  SOLUTION_FILE_PATH: .
+
+  # Configuration type to build.
+  # You can convert this to a build matrix if you need coverage of multiple configuration types.
+  # https://docs.github.com/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+  BUILD_CONFIGURATION: Release
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install suitable Python version
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12' 
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v1
+    
+    - name: Bootstrap
+      shell: cmd
+      run: ./Bootstrap.bat
+
+    - name: Build
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      # Add additional options to the MSBuild command line here (like platform or verbosity level).
+      # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
+      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+      
+    - name: Cleanup
+      shell: cmd
+      run: cd "bin/${{env.BUILD_CONFIGURATION}}-windows-x64/" && del /s /q *.pdb
+      
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+          name: Prism_${{env.BUILD_CONFIGURATION}}-windows-x64
+          path: ./bin/${{env.BUILD_CONFIGURATION}}-windows-x64/
+
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install suitable Python version
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12' 
+  
+    - name: Install conan and update global config
+      shell: bash
+      # conan config home seems to default create the global.conf???
+      run: pip install conan'>=2' && conan config home && echo -e "tools.system.package_manager:mode = install\ntools.system.package_manager:sudo = True" >> ~/.conan2/global.conf
+
+    - name: Bootstrap
+      shell: bash
+      run: ./Bootstrap.sh
+
+    - name: Build
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: make --file=${{env.SOLUTION_FILE_PATH}}/Makefile config=$(echo "${{env.BUILD_CONFIGURATION}}" | awk '{print tolower($0)}') -j$(nproc)
+
+    - name: Cleanup
+      shell: bash
+      run: cd "bin/${{env.BUILD_CONFIGURATION}}-linux-x64/" && rm -f *.pdb **/*.pdb
+      
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+          name: Prism_${{env.BUILD_CONFIGURATION}}-linux-x64
+          path: ./bin/${{env.BUILD_CONFIGURATION}}-linux-x64/
